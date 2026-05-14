@@ -153,3 +153,14 @@ class Goal(Base):
     range_end = sa.Column(sa.String, nullable=False)
     created_at = sa.Column(sa.DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = sa.Column(sa.DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id = sa.Column(UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()"))
+    user_id = sa.Column(UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False)
+    token = sa.Column(sa.String, unique=True, nullable=False, index=True)
+    expires_at = sa.Column(sa.DateTime(timezone=True), nullable=False)
+    revoked = sa.Column(sa.Boolean, nullable=False, default=False)
+    created_at = sa.Column(sa.DateTime(timezone=True), nullable=False, default=_utcnow)

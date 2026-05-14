@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import ExchangeCode, OAuthState, User
+from app.models import ExchangeCode, OAuthState, RefreshToken, User
 from app.services.qf_client import _post_qf_token
 
 
@@ -148,7 +148,7 @@ def create_jwt(user: User) -> str:
     payload = {
         "sub": str(user.id),
         "email": user.email,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=24),
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=30),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 
@@ -170,3 +170,51 @@ def build_qf_authorization_url(state: str, code_challenge: str) -> str:
         "code_challenge_method": "S256",
     }
     return f"{settings.qf_auth_base_url}/oauth2/auth?{urlencode(params)}"
+
+
+async def create_refresh_token(db: AsyncSession, user_id: UUID, *, commit: bool = True) -> str:
+    token = secrets.token_urlsafe(48)
+    refresh = RefreshToken(
+        user_id=user_id,
+        token=token,
+        revoked=False,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+    )
+    db.add(refresh)
+    if commit:
+        await db.commit()
+    return token
+
+
+async def rotate_refresh_token(db: AsyncSession, token_str: str) -> tuple[User, str]:
+    result = await db.execute(
+        select(RefreshToken)
+        .where(
+            RefreshToken.token == token_str,
+            RefreshToken.revoked == False,
+            RefreshToken.expires_at > datetime.now(timezone.utc),
+        )
+        .with_for_update()
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        check = await db.execute(
+            select(RefreshToken).where(RefreshToken.token == token_str)
+        )
+        existing = check.scalar_one_or_none()
+        if existing is None:
+            raise HTTPException(status_code=401, detail="invalid_refresh_token")
+        raise HTTPException(status_code=401, detail="refresh_token_expired")
+
+    row.revoked = True
+    db.add(row)
+
+    new_token_str = await create_refresh_token(db, row.user_id, commit=False)
+
+    result = await db.execute(select(User).where(User.id == row.user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=401, detail="user_not_found")
+
+    await db.commit()
+    return user, new_token_str

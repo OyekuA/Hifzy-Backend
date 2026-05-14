@@ -28,8 +28,10 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Missing or invalid credentials")
     try:
         payload = decode_jwt(token.credentials)
+    except ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="token_expired")
     except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+        raise HTTPException(status_code=401, detail="invalid_token")
     try:
         return UUID(payload["sub"])
     except (KeyError, ValueError, TypeError):

@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.dependencies import get_current_user, get_db
-from app.models import ExchangeCode, User
-from app.schemas import ExchangeRequest, ExchangeResponse, UserProfile
+from app.models import ExchangeCode, RefreshToken, User
+from app.schemas import ExchangeRequest, ExchangeResponse, RefreshRequest, RefreshResponse, UserProfile
 from app.services import auth_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -72,8 +72,9 @@ async def exchange(body: ExchangeRequest, db: AsyncSession = Depends(get_db)):
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=400, detail="User not found")
-    token = auth_service.create_jwt(user)
-    return ExchangeResponse(token=token)
+    access_token = auth_service.create_jwt(user)
+    refresh_token = await auth_service.create_refresh_token(db, user_id)
+    return ExchangeResponse(access_token=access_token, refresh_token=refresh_token)
 
 
 @router.get("/me", response_model=UserProfile)
@@ -85,6 +86,13 @@ async def me(user_id: UUID = Depends(get_current_user), db: AsyncSession = Depen
     return UserProfile.model_validate(user)
 
 
+@router.post("/refresh", response_model=RefreshResponse)
+async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    user, new_refresh = await auth_service.rotate_refresh_token(db, body.refresh_token)
+    access_token = auth_service.create_jwt(user)
+    return RefreshResponse(access_token=access_token, refresh_token=new_refresh)
+
+
 @router.post("/logout")
 async def logout(
     user_id: UUID = Depends(get_current_user),
@@ -94,6 +102,11 @@ async def logout(
         update(ExchangeCode)
         .where(ExchangeCode.user_id == user_id, ExchangeCode.used == False)
         .values(used=True)
+    )
+    await db.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user_id, RefreshToken.revoked == False)
+        .values(revoked=True)
     )
     await db.execute(
         update(User)
