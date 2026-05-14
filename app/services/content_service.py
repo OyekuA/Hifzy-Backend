@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.constants import SURAH_VERSE_COUNTS, PAGE_TO_VERSE, TOTAL_PAGES
-from app.models import CachedVerse
-from app.schemas import ChapterOut, MetadataResponse, ReciterOut, VerseOut
+from app.models import CachedVerse, DailyVerse
+from app.schemas import ChapterOut, DailyVerseOut, MetadataResponse, ReciterOut, VerseOut
 from app.services.qf_client import _post_qf_token
 
 _token_cache: dict[str, Any] = {"access_token": None, "expires_at": None}
@@ -443,3 +443,58 @@ async def get_metadata() -> MetadataResponse:
         _metadata_cache["data"] = result
         _metadata_cache["fetched_at"] = now
         return result
+
+
+async def get_daily_verse(db: AsyncSession) -> DailyVerseOut:
+    today = datetime.now(timezone.utc).date()
+
+    stmt = select(DailyVerse).where(DailyVerse.date == today)
+    result = await db.execute(stmt)
+    row = result.scalar_one_or_none()
+
+    if row is not None:
+        return DailyVerseOut.model_validate(row)
+
+    try:
+        token = await get_client_credentials_token()
+        data = await _call_qf_api(
+            "/verses/random",
+            token,
+            {"fields": "text_uthmani,chapter_id,verse_number,juz_number,page_number"},
+        )
+    except httpx.HTTPError:
+        raise HTTPException(status_code=503, detail="QF Content API unavailable")
+
+    verse = data["verse"]
+    verse_key = verse["verse_key"]
+    arabic_text = verse["text_uthmani"]
+    chapter_id = verse["chapter_id"]
+    verse_number = verse["verse_number"]
+    juz_number = verse.get("juz_number")
+    page_number = verse.get("page_number")
+
+    now = datetime.now(timezone.utc)
+    stmt = (
+        pg_insert(DailyVerse)
+        .values(
+            date=today,
+            verse_key=verse_key,
+            arabic_text=arabic_text,
+            chapter_id=chapter_id,
+            verse_number=verse_number,
+            juz_number=juz_number,
+            page_number=page_number,
+            fetched_at=now,
+        )
+        .on_conflict_do_nothing(
+            index_elements=[DailyVerse.date],
+        )
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+    stmt = select(DailyVerse).where(DailyVerse.date == today)
+    result = await db.execute(stmt)
+    row = result.scalar_one()
+
+    return DailyVerseOut.model_validate(row)

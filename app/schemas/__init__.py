@@ -250,3 +250,14 @@ class GoalOut(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DailyVerseOut(BaseModel):
+    verse_key: str
+    arabic_text: str
+    chapter_id: int
+    verse_number: int
+    juz_number: int | None = None
+    page_number: int | None = None
+
+    model_config = {"from_attributes": True}

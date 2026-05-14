@@ -59,6 +59,19 @@ class CachedVerse(Base):
     cached_at = sa.Column(sa.DateTime(timezone=True), nullable=False, default=_utcnow)
 
 
+class DailyVerse(Base):
+    __tablename__ = "daily_verse"
+
+    date = sa.Column(sa.Date, primary_key=True)
+    verse_key = sa.Column(sa.String, nullable=False)
+    arabic_text = sa.Column(sa.Text, nullable=False)
+    chapter_id = sa.Column(sa.Integer, nullable=False)
+    verse_number = sa.Column(sa.Integer, nullable=False)
+    juz_number = sa.Column(sa.Integer, nullable=True)
+    page_number = sa.Column(sa.Integer, nullable=True)
+    fetched_at = sa.Column(sa.DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
 class Deck(Base):
     __tablename__ = "decks"
 

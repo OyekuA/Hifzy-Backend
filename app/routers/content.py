@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db
-from app.schemas import MetadataResponse, VerseOut
+from app.schemas import DailyVerseOut, MetadataResponse, VerseOut
 from app.services import content_service
 
 router = APIRouter(prefix="/content", tags=["content"])
@@ -31,3 +31,10 @@ async def get_verses(
 async def get_metadata(
 ) -> MetadataResponse:
     return await content_service.get_metadata()
+
+
+@router.get("/daily-verse")
+async def get_daily_verse(
+    db: AsyncSession = Depends(get_db),
+) -> DailyVerseOut:
+    return await content_service.get_daily_verse(db)
