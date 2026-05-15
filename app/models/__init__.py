@@ -1,8 +1,7 @@
-import uuid
 from datetime import datetime, timezone
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import UUID, JSON, BIGINT
+from sqlalchemy.dialects.postgresql import UUID, JSON
 
 from app.database import Base
 

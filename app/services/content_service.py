@@ -542,6 +542,23 @@ async def get_daily_verse(db: AsyncSession, translation_id: int = 85) -> DailyVe
     result = await db.execute(stmt)
     row = result.scalar_one()
 
+    if row.translation_text is None:
+        effective_translation_id = row.requested_translation_id or translation_id
+        try:
+            token = await get_client_credentials_token()
+            data = await _call_qf_api(
+                f"/verses/by_key/{row.chapter_id}:{row.verse_number}",
+                token,
+                {"translations": str(effective_translation_id)},
+            )
+            verse = data.get("verse", {})
+            translations = verse.get("translations", [])
+            row.translation_text = translations[0].get("text") if translations else None
+            row.translation_resource_id = translations[0].get("resource_id") if translations else None
+            await db.commit()
+        except (httpx.HTTPError, HTTPException):
+            pass
+
     return DailyVerseOut(
         verse_key=row.verse_key,
         arabic_text=row.arabic_text,

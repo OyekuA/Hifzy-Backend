@@ -94,7 +94,7 @@ async def create_goal(db: AsyncSession, user_id: UUID, range_start: str, range_e
 
 
 async def update_goal(db: AsyncSession, user_id: UUID, goal_id: UUID, range_start: str, range_end: str, mushaf_id: int | None = None, user_timezone: str | None = None) -> Goal:
-    verse_keys = parse_verse_range(range_start, range_end)
+    parse_verse_range(range_start, range_end)
 
     result = await db.execute(select(Goal).where(Goal.id == goal_id))
     goal = result.scalar_one_or_none()
