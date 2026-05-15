@@ -25,6 +25,7 @@ _metadata_lock = asyncio.Lock()
 METADATA_CACHE_TTL = timedelta(hours=1)
 
 AUDIO_STALE_DAYS = 7
+QURAN_COM_BASE = "https://quran.com"
 
 _VERSE_KEY_RE = re.compile(r"^\d+:\d+$")
 
@@ -445,7 +446,7 @@ async def get_metadata() -> MetadataResponse:
         return result
 
 
-async def get_daily_verse(db: AsyncSession) -> DailyVerseOut:
+async def get_daily_verse(db: AsyncSession, translation_id: int = 85) -> DailyVerseOut:
     today = datetime.now(timezone.utc).date()
 
     stmt = select(DailyVerse).where(DailyVerse.date == today)
@@ -453,14 +454,42 @@ async def get_daily_verse(db: AsyncSession) -> DailyVerseOut:
     row = result.scalar_one_or_none()
 
     if row is not None:
-        return DailyVerseOut.model_validate(row)
+        if row.translation_text is None:
+            effective_translation_id = row.requested_translation_id or translation_id
+            try:
+                token = await get_client_credentials_token()
+                data = await _call_qf_api(
+                    f"/verses/by_key/{row.chapter_id}:{row.verse_number}",
+                    token,
+                    {"translations": str(effective_translation_id)},
+                )
+                verse = data.get("verse", {})
+                translations = verse.get("translations", [])
+                row.translation_text = translations[0].get("text") if translations else None
+                row.translation_resource_id = translations[0].get("resource_id") if translations else None
+                await db.commit()
+            except (httpx.HTTPError, HTTPException):
+                pass
+
+        return DailyVerseOut(
+            verse_key=row.verse_key,
+            arabic_text=row.arabic_text,
+            chapter_id=row.chapter_id,
+            verse_number=row.verse_number,
+            juz_number=row.juz_number,
+            page_number=row.page_number,
+            translation_text=row.translation_text,
+            tafsir_url=f"{QURAN_COM_BASE}/{row.chapter_id}/{row.verse_number}/tafsirs",
+        )
 
     try:
         token = await get_client_credentials_token()
         data = await _call_qf_api(
             "/verses/random",
             token,
-            {"fields": "text_uthmani,chapter_id,verse_number,juz_number,page_number"},
+            {
+                "fields": "text_uthmani,chapter_id,verse_number,juz_number,page_number",
+            },
         )
     except httpx.HTTPError:
         raise HTTPException(status_code=503, detail="QF Content API unavailable")
@@ -473,6 +502,19 @@ async def get_daily_verse(db: AsyncSession) -> DailyVerseOut:
     juz_number = verse.get("juz_number")
     page_number = verse.get("page_number")
 
+    try:
+        data = await _call_qf_api(
+            f"/verses/by_key/{verse_key}",
+            token,
+            {"translations": str(translation_id)},
+        )
+        translations = data.get("verse", {}).get("translations", [])
+        translation_text = translations[0].get("text") if translations else None
+        translation_resource_id = translations[0].get("resource_id") if translations else None
+    except (httpx.HTTPError, HTTPException):
+        translation_text = None
+        translation_resource_id = None
+
     now = datetime.now(timezone.utc)
     stmt = (
         pg_insert(DailyVerse)
@@ -484,6 +526,9 @@ async def get_daily_verse(db: AsyncSession) -> DailyVerseOut:
             verse_number=verse_number,
             juz_number=juz_number,
             page_number=page_number,
+            translation_text=translation_text,
+            translation_resource_id=translation_resource_id,
+            requested_translation_id=translation_id,
             fetched_at=now,
         )
         .on_conflict_do_nothing(
@@ -497,4 +542,13 @@ async def get_daily_verse(db: AsyncSession) -> DailyVerseOut:
     result = await db.execute(stmt)
     row = result.scalar_one()
 
-    return DailyVerseOut.model_validate(row)
+    return DailyVerseOut(
+        verse_key=row.verse_key,
+        arabic_text=row.arabic_text,
+        chapter_id=row.chapter_id,
+        verse_number=row.verse_number,
+        juz_number=row.juz_number,
+        page_number=row.page_number,
+        translation_text=row.translation_text,
+        tafsir_url=f"{QURAN_COM_BASE}/{row.chapter_id}/{row.verse_number}/tafsirs",
+    )

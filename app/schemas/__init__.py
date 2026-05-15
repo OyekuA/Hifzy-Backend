@@ -259,5 +259,7 @@ class DailyVerseOut(BaseModel):
     verse_number: int
     juz_number: int | None = None
     page_number: int | None = None
+    translation_text: str | None = None
+    tafsir_url: str | None = None
 
     model_config = {"from_attributes": True}

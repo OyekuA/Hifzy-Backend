@@ -69,6 +69,9 @@ class DailyVerse(Base):
     verse_number = sa.Column(sa.Integer, nullable=False)
     juz_number = sa.Column(sa.Integer, nullable=True)
     page_number = sa.Column(sa.Integer, nullable=True)
+    translation_text = sa.Column(sa.Text, nullable=True)
+    translation_resource_id = sa.Column(sa.Integer, nullable=True)
+    requested_translation_id = sa.Column(sa.Integer, nullable=True)
     fetched_at = sa.Column(sa.DateTime(timezone=True), nullable=False, default=_utcnow)
 
 

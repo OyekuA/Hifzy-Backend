@@ -33,8 +33,9 @@ async def get_metadata(
     return await content_service.get_metadata()
 
 
-@router.get("/daily-verse")
+@router.get("/daily-verse", description="Returns a random verse of the day, cached per UTC day. The first request of any UTC day determines the verse for all subsequent requests until midnight UTC. Translation is cached with the verse; the first translation_id used each day wins. A tafsir_url deep link to Quran.com is included in the response.")
 async def get_daily_verse(
+    translation_id: int = Query(85, description="QF translation resource ID. Default 85 = M.A.S. Abdel Haleem (Oxford World's Classics)"),
     db: AsyncSession = Depends(get_db),
 ) -> DailyVerseOut:
-    return await content_service.get_daily_verse(db)
+    return await content_service.get_daily_verse(db, translation_id=translation_id)
