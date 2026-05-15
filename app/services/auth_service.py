@@ -187,24 +187,59 @@ async def create_refresh_token(db: AsyncSession, user_id: UUID, *, commit: bool 
 
 
 async def rotate_refresh_token(db: AsyncSession, token_str: str) -> tuple[User, str]:
+    now = datetime.now(timezone.utc)
+
     result = await db.execute(
         select(RefreshToken)
         .where(
             RefreshToken.token == token_str,
             RefreshToken.revoked == False,
-            RefreshToken.expires_at > datetime.now(timezone.utc),
+            RefreshToken.expires_at > now,
         )
         .with_for_update()
     )
     row = result.scalar_one_or_none()
     if row is None:
-        check = await db.execute(
-            select(RefreshToken).where(RefreshToken.token == token_str)
+        user_id_subq = (
+            select(RefreshToken.user_id)
+            .where(RefreshToken.token == token_str)
+            .scalar_subquery()
         )
-        existing = check.scalar_one_or_none()
-        if existing is None:
-            raise HTTPException(status_code=401, detail="invalid_refresh_token")
-        raise HTTPException(status_code=401, detail="refresh_token_expired")
+        latest = await db.execute(
+            select(RefreshToken)
+            .where(
+                RefreshToken.user_id == user_id_subq,
+                RefreshToken.revoked == False,
+                RefreshToken.expires_at > now,
+            )
+            .order_by(RefreshToken.created_at.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        latest_row = latest.scalar_one_or_none()
+
+        if latest_row is None:
+            check = await db.execute(
+                select(RefreshToken).where(RefreshToken.token == token_str)
+            )
+            existing = check.scalar_one_or_none()
+            if existing is None:
+                raise HTTPException(status_code=401, detail="invalid_refresh_token")
+            raise HTTPException(status_code=401, detail="refresh_token_expired")
+
+        user_id = latest_row.user_id
+        latest_row.revoked = True
+        db.add(latest_row)
+
+        new_token_str = await create_refresh_token(db, user_id, commit=False)
+
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=401, detail="user_not_found")
+
+        await db.commit()
+        return user, new_token_str
 
     row.revoked = True
     db.add(row)
