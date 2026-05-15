@@ -46,6 +46,7 @@ Users log in with their Quran.com account. PKCE is used so the code verifier nev
 | `GET /recitations/{id}/by_chapter/{chapter}` | Per-verse audio file URLs |
 | `GET /chapters` | Surah list with Arabic and English names |
 | `GET /resources/recitations` | Available reciters |
+| `GET /verses/random` | Daily verse fetch — gets random verse metadata; translation fetched separately via /verses/by_key |
 
 Results are cached in Postgres. Audio URLs are considered stale after 7 days and re-fetched on the next request.
 
@@ -75,6 +76,8 @@ Every sync push triggers these calls asynchronously via an outbox — a QF API f
 **WatermelonDB sync** — Pull returns all records changed since `lastPulledAt` using a monotonic Postgres sequence (`server_version_seq`). Push upserts records and enforces ownership — you cannot modify another user's records. The response timestamp is the sequence value snapshotted at the start of the pull, not a wall clock time.
 
 **Verse cache** — Arabic text and audio URLs are stored in `cached_verses`. A cache miss fetches from the QF Content API and stores the result. Audio URLs are re-fetched if older than 7 days.
+
+**Daily verse** — `GET /content/daily-verse` returns a random verse once per UTC day. On the first request of the day, the backend performs a two-step fetch: first `GET /verses/random` on the QF Content API to obtain random verse metadata (no translation), then `GET /verses/by_key` with the resulting `verse_key` and the configurable `translation_id` (default `85` = M.A.S. Abdel Haleem) to retrieve the English translation. The combined result is cached in the `daily_verse` table. All subsequent requests that day return the cached row — no external call needed. The verse and its English translation are stored together; the first `translation_id` used each day wins. The response includes `tafsir_url` (`https://quran.com/{chapter}/{verse}/tafsirs`) so the frontend can link users directly to Quran.com for tafsir — solving the out-of-context problem for mid-passage verses. If today's cached verse has no translation (e.g. due to a transient QF API failure on the first request), any subsequent request that day will automatically attempt to back-fill the translation before returning the cached row.
 
 **Token refresh** — Before any User API call, `token_service.get_valid_token` checks whether the stored access token is still valid. If not, it uses the refresh token to get a new one and updates the DB. If the refresh token is also expired, the outbox row is marked `failed`.
 
@@ -149,6 +152,7 @@ open http://localhost:8000/docs
 | `GET` | `/auth/callback` | QF redirects here after login; issues a one-time code to the frontend |
 | `POST` | `/auth/exchange` | Frontend exchanges the one-time code for a JWT |
 | `GET` | `/auth/me` | Returns the logged-in user's profile (local DB only, no external call) |
+| `POST` | `/auth/refresh` | Exchanges a refresh token for a new JWT + refresh token pair |
 | `POST` | `/auth/logout` | Clears stored QF tokens |
 
 ### Content `/content`
@@ -157,6 +161,7 @@ open http://localhost:8000/docs
 |---|---|---|
 | `GET` | `/content/verses` | Arabic text + audio URL for a verse or page range |
 | `GET` | `/content/metadata` | Surah list and available reciters |
+| `GET` | `/content/daily-verse` | Random verse of the day with English translation, cached per UTC day. Optional `?translation_id=` query param (default `85` = M.A.S. Abdel Haleem). The first request of each UTC day determines the verse for all users. Response includes `tafsir_url` deep link to Quran.com for full context and tafsir. |
 
 ### Sync `/sync`
 
@@ -186,6 +191,7 @@ open http://localhost:8000/docs
 - All protected endpoints require `Authorization: Bearer <jwt>`.
 - The sync protocol follows WatermelonDB's standard `synchronize()` contract — pull first, then push.
 - `GET /content/verses` accepts either `range_start` + `range_end` (e.g. `2:1` and `2:10`) or `page_start` + `page_end` (1–604). `recitation_id` is always required.
+- `GET /content/daily-verse` accepts an optional `?translation_id=<int>` query param (default `85` = M.A.S. Abdel Haleem). The first `translation_id` used each UTC day wins and is cached. If today's cached verse has no translation (e.g. due to a prior QF API failure), the next request will automatically back-fill it.
 
 ---
 
