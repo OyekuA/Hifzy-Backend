@@ -86,6 +86,8 @@ class DeckSync(BaseModel):
     range_start: str
     range_end: str
     recitation_id: int
+    start_surah_name: str | None = None
+    end_surah_name: str | None = None
     is_deleted: bool
     server_version: int
     created_at: datetime
@@ -107,6 +109,9 @@ class CardSync(BaseModel):
     is_deleted: bool
     server_version: int
     updated_at: datetime
+    arabic_text: str | None = None
+    audio_url: str | None = None
+    answer_verses: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -162,6 +167,8 @@ class DeckPush(BaseModel):
     range_start: str
     range_end: str
     recitation_id: int
+    start_surah_name: str | None = None
+    end_surah_name: str | None = None
 
 
 class CardPush(BaseModel):
@@ -174,6 +181,9 @@ class CardPush(BaseModel):
     lapses: int
     state: str
     due_date: datetime
+    arabic_text: str | None = None
+    audio_url: str | None = None
+    answer_verses: str | None = None
 
 
 class ReviewLogPush(BaseModel):

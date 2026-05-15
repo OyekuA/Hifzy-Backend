@@ -11,6 +11,7 @@ from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.constants import SURAH_NAMES
 from app.models import (
     BridgeOutbox,
     Card,
@@ -188,6 +189,14 @@ async def _verify_child_refs(db: AsyncSession, user_id: UUID, changes) -> None:
 async def _upsert_decks(db, user_id, table_changes, now):
     for item in table_changes.created + table_changes.updated:
         data = item.model_dump()
+        _validate_verse_key(data["range_start"], "range_start")
+        _validate_verse_key(data["range_end"], "range_end")
+        start_surah_num = int(data["range_start"].split(":")[0])
+        end_surah_num = int(data["range_end"].split(":")[0])
+        if data.get("start_surah_name") is None:
+            data["start_surah_name"] = SURAH_NAMES.get(start_surah_num)
+        if data.get("end_surah_name") is None:
+            data["end_surah_name"] = SURAH_NAMES.get(end_surah_num)
         data.update({"user_id": user_id, "is_deleted": False, "updated_at": now})
         stmt = (
             pg_insert(Deck)
@@ -199,6 +208,8 @@ async def _upsert_decks(db, user_id, table_changes, now):
                     "range_start": data["range_start"],
                     "range_end": data["range_end"],
                     "recitation_id": data["recitation_id"],
+                    "start_surah_name": data["start_surah_name"],
+                    "end_surah_name": data["end_surah_name"],
                     "user_id": user_id,
                     "is_deleted": False,
                     "server_version": server_version_seq.next_value(),
@@ -240,6 +251,9 @@ async def _upsert_cards(db, user_id, table_changes, now):
                     "lapses": data["lapses"],
                     "state": data["state"],
                     "due_date": data["due_date"],
+                    "arabic_text": data["arabic_text"],
+                    "audio_url": data["audio_url"],
+                    "answer_verses": data["answer_verses"],
                     "user_id": user_id,
                     "is_deleted": False,
                     "server_version": server_version_seq.next_value(),
@@ -346,11 +360,19 @@ async def _upsert_preferences(db, user_id, table_changes, now):
         await db.execute(stmt)
 
 
-_VERSE_KEY_RE = re.compile(r"^(\d+):(\d+)$")
+_VERSE_KEY_RE = re.compile(r"^\d+:\d+$")
+
+
+def _validate_verse_key(value: str, label: str) -> None:
+    if not _VERSE_KEY_RE.match(value):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid {label}: must be in 'surah:ayah' format, e.g. '2:1', got '{value}'",
+        )
 
 
 def _parse_verse_key_parts(vk: str) -> tuple[int, int]:
-    m = _VERSE_KEY_RE.match(vk)
+    m = re.match(r"^(\d+):(\d+)$", vk)
     if m is None:
         return 0, 0
     return int(m.group(1)), int(m.group(2))
